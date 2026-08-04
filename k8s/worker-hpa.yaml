@@ -1,0 +1,51 @@
+# CPU-based autoscaling: simple and requires nothing beyond metrics-server.
+# Better fit long-term: scale on Redis stream backlog (XLEN/consumer lag)
+# via KEDA's redis-streams scaler, since "queue is growing" is a more direct
+# signal than CPU for this workload — swap this HPA for a KEDA ScaledObject
+# once you're tuning for real traffic patterns.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker-hpa
+  namespace: francurial
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 2
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: 75 }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies: [{ type: Percent, value: 100, periodSeconds: 60 }]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{ type: Percent, value: 25, periodSeconds: 60 }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway-hpa
+  namespace: francurial
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

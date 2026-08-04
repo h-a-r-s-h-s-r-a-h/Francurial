@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: francurial
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gateway }
+  template:
+    metadata:
+      labels: { app: gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: francurial/gateway:latest
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: francurial-config }
+          env:
+            # order matters: these feed the $(...) substitution in DATABASE_URL below
+            - name: POSTGRES_USER
+              valueFrom: { configMapKeyRef: { name: francurial-config, key: POSTGRES_USER } }
+            - name: POSTGRES_HOST
+              valueFrom: { configMapKeyRef: { name: francurial-config, key: POSTGRES_HOST } }
+            - name: POSTGRES_DB
+              valueFrom: { configMapKeyRef: { name: francurial-config, key: POSTGRES_DB } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: POSTGRES_PASSWORD } }
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):5432/$(POSTGRES_DB)"
+            - name: API_KEYS
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: API_KEYS } }
+            - name: LIVE_URL_SECRET
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: LIVE_URL_SECRET } }
+            - name: WEBHOOK_HMAC_SECRET
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: WEBHOOK_HMAC_SECRET } }
+            - name: CREDENTIALS_ENC_KEY
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: CREDENTIALS_ENC_KEY } }
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: INTERNAL_SHARED_SECRET } }
+            - name: OPENROUTER_KEY
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: OPENROUTER_KEY } }
+            - name: PROXY
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: PROXY } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: francurial
+spec:
+  selector: { app: gateway }
+  ports: [{ port: 8000, targetPort: 8000 }]

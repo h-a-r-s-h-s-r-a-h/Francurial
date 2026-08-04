@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: francurial-config
+  namespace: francurial
+data:
+  MODEL: "openai/gpt-5.4-nano"
+  MAX_AGENT_STEPS: "40"
+  CAPTCHA_SOLVE_ATTEMPTS: "2"
+  WORKER_CONCURRENCY: "1"
+  WORKER_INTERNAL_PORT: "9000"
+  GATEWAY_PORT: "8000"
+  LIVE_URL_TTL_SECONDS: "7200"
+  PUBLIC_BASE_URL: "https://app.example.com" # set to your real ingress host
+  GATEWAY_INTERNAL_URL: "http://gateway:8000"
+  REDIS_URL: "redis://redis:6379/0"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "francurial"
+  POSTGRES_USER: "francurial"

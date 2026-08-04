@@ -1,0 +1,34 @@
+# Single-replica Redis is fine for demoing the queue/pubsub/control-lock
+# mechanism. For real traffic, use a managed Redis (ElastiCache/Memorystore)
+# or a proper Sentinel/Cluster topology — this is a single point of failure
+# for the task queue as written.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: francurial
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports: [{ containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: francurial
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]

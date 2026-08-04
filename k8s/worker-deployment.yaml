@@ -1,0 +1,52 @@
+# No Service in front of these pods on purpose: the gateway's live-view proxy
+# (app/controllers/live_controller.py) dials a specific worker POD'S IP
+# directly (registered on task claim), not a load-balanced Service — a
+# ClusterIP Service would round-robin across pods and break "route this
+# task's live link to the exact pod running it."
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: francurial
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      containers:
+        - name: worker
+          image: francurial/worker:latest
+          ports: [{ containerPort: 9000 }]
+          envFrom:
+            - configMapRef: { name: francurial-config }
+          env:
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: OPENROUTER_KEY
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: OPENROUTER_KEY } }
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: INTERNAL_SHARED_SECRET } }
+            - name: PROXY
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: PROXY } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 9000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 9000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            # Headless Chromium is the dominant cost here — tune against your
+            # own load test, this is a starting point, not a measured number.
+            requests: { cpu: "500m", memory: "768Mi" }
+            limits: { cpu: "1500m", memory: "1.5Gi" }
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: dshm
+          emptyDir: { medium: Memory, sizeLimit: 1Gi }

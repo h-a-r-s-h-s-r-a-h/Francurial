@@ -1,0 +1,51 @@
+# Fine for demoing the whole stack in-cluster. For real production traffic,
+# point POSTGRES_HOST/DATABASE_URL at a managed Postgres (RDS/Cloud SQL/etc)
+# instead — you don't want your task/audit-log database's durability tied to
+# a single StatefulSet pod's PVC.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: francurial
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{ containerPort: 5432 }]
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { configMapKeyRef: { name: francurial-config, key: POSTGRES_USER } }
+            - name: POSTGRES_DB
+              valueFrom: { configMapKeyRef: { name: francurial-config, key: POSTGRES_DB } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: francurial-secrets, key: POSTGRES_PASSWORD } }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "$(POSTGRES_USER)"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: francurial
+spec:
+  clusterIP: None
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]

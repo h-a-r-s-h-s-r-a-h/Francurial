@@ -1,0 +1,160 @@
+{
+  "info": {
+    "name": "Francurial",
+    "description": "Browser-automation task API: submit a task, check status, take/release control, and (internal) worker callbacks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "api_key", "value": "dev-local-key-change-me", "type": "string" },
+    { "key": "internal_secret", "value": "change-me-internal-shared-secret", "type": "string" },
+    { "key": "task_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/healthz", "host": ["{{base_url}}"], "path": ["healthz"] }
+      }
+    },
+    {
+      "name": "Create Task",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 202) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('task_id', body.task_id);",
+              "    console.log('Saved task_id:', body.task_id, '| live_url:', body.live_url);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/v1/tasks", "host": ["{{base_url}}"], "path": ["v1", "tasks"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://www.amazon.com\",\n  \"instruction\": \"Login, search for Samsung 990 Pro 2TB SSD, add it to cart, and proceed to checkout without confirming the final purchase.\",\n  \"credentials\": {\n    \"email\": \"user@example.com\",\n    \"password\": \"mypassword\"\n  },\n  \"model\": \"openai/gpt-4o-mini\",\n  \"proxy\": {\n    \"host\": \"31.59.20.176\",\n    \"port\": 6754,\n    \"username\": \"klrxjayu\",\n    \"password\": \"2tmm11kat7hg\"\n  },\n  \"webhook_url\": null,\n  \"max_steps\": 40,\n  \"timeout_seconds\": 600\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Task (with explicit proxy + model override)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/v1/tasks", "host": ["{{base_url}}"], "path": ["v1", "tasks"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://example.com\",\n  \"instruction\": \"Describe what you see, then finish.\",\n  \"proxy\": {\n    \"host\": \"proxy.example.com\",\n    \"port\": 6000,\n    \"username\": \"user\",\n    \"password\": \"pass\"\n  },\n  \"model\": \"openai/gpt-4o-mini\",\n  \"max_steps\": 10\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Task Status",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "url": {
+          "raw": "{{base_url}}/v1/tasks/{{task_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "tasks", "{{task_id}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Continue Task (resume after CAPTCHA solved / human release)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/tasks/{{task_id}}/continue",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "tasks", "{{task_id}}", "continue"]
+        },
+        "body": { "mode": "raw", "raw": "{\n  \"note\": \"captcha solved manually\"\n}" }
+      },
+      "response": []
+    },
+    {
+      "name": "Internal (worker-only, for debugging)",
+      "item": [
+        {
+          "name": "Claim Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Internal-Secret", "value": "{{internal_secret}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/internal/tasks/{{task_id}}/claim",
+              "host": ["{{base_url}}"],
+              "path": ["internal", "tasks", "{{task_id}}", "claim"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"worker_addr\": \"127.0.0.1:9000\"\n}" }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Internal-Secret", "value": "{{internal_secret}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/internal/tasks/{{task_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["internal", "tasks", "{{task_id}}", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"running\",\n  \"wait_reason\": null,\n  \"control_state\": \"agent\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Append Audit Log",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Internal-Secret", "value": "{{internal_secret}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/internal/tasks/{{task_id}}/audit",
+              "host": ["{{base_url}}"],
+              "path": ["internal", "tasks", "{{task_id}}", "audit"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step_index\": 1,\n  \"type\": \"reason\",\n  \"payload\": { \"action\": \"click\" }\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
