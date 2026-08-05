@@ -8,32 +8,29 @@ const CAPTCHA_MARKERS = [
   '[class*="captcha" i]',
 ];
 
-const POLL_ATTEMPTS = 3;
-const POLL_DELAY_MS = 700;
-
 /**
  * page.locator(...).isVisible() does NOT auto-wait — it checks the DOM at
- * that exact instant. Challenge widgets are frequently injected async
- * (a script loads, then builds the iframe a few hundred ms later), so a
- * single instantaneous check can miss a real captcha that's about to
- * render. Poll briefly, and also check the page title directly — some sites
- * (Flipkart included) title the whole interstitial page e.g. "Flipkart
- * reCAPTCHA", which is a free, instant, race-proof signal.
+ * that exact instant. Challenge widgets are frequently injected async, so a
+ * single instantaneous check can in principle miss one that's about to
+ * render. That used to be "fixed" here by polling 3x with 700ms waits — but
+ * this function already runs fresh on every single agentLoop step, so a
+ * miss at step N gets caught by step N+1 a couple seconds later regardless.
+ * The internal poll was redundant with that outer retry and cost ~1.4s+ on
+ * EVERY step, forever, whether or not a captcha was ever present — measured
+ * via timing logs, not assumed. One fast pass per call; rely on the loop's
+ * natural cadence for the rare async-injection edge case.
  */
 export async function detectCaptcha(page) {
-  for (let attempt = 1; attempt <= POLL_ATTEMPTS; attempt++) {
-    const title = await page.title().catch(() => "");
-    if (/captcha/i.test(title)) {
-      return { detected: true, selector: null, via: "title" };
-    }
-
-    for (const selector of CAPTCHA_MARKERS) {
-      const found = await page.locator(selector).first().isVisible().catch(() => false);
-      if (found) return { detected: true, selector, via: "dom" };
-    }
-
-    if (attempt < POLL_ATTEMPTS) await page.waitForTimeout(POLL_DELAY_MS);
+  const title = await page.title().catch(() => "");
+  if (/captcha/i.test(title)) {
+    return { detected: true, selector: null, via: "title" };
   }
+
+  for (const selector of CAPTCHA_MARKERS) {
+    const found = await page.locator(selector).first().isVisible().catch(() => false);
+    if (found) return { detected: true, selector, via: "dom" };
+  }
+
   return { detected: false };
 }
 

@@ -39,28 +39,46 @@ export async function perceive(page) {
     const elements = candidates
       .filter(isVisible)
       .slice(0, 120)
-      .map((el) => ({
-        tag: el.tagName.toLowerCase(),
-        selector: selectorFor(el),
-        text: (el.innerText || el.value || el.getAttribute("aria-label") || "").trim().slice(0, 80),
-        type: el.getAttribute("type") || undefined,
-        placeholder: el.getAttribute("placeholder") || undefined,
-      }));
+      .map((el) => {
+        const isPassword = (el.getAttribute("type") || "").toLowerCase() === "password";
+        // el.value is the real plaintext regardless of type="password" —
+        // that masking is purely visual rendering, not a JS-level
+        // restriction. Without this guard, the actual password gets
+        // serialized into visible_elements and sent to the LLM on every
+        // perceive() AFTER the one that typed it, defeating the entire
+        // "never show credentials to the model" design.
+        const rawText = isPassword ? (el.value ? "[hidden]" : "") : el.innerText || el.value || el.getAttribute("aria-label") || "";
+        return {
+          tag: el.tagName.toLowerCase(),
+          selector: selectorFor(el),
+          text: rawText.trim().slice(0, 80),
+          type: el.getAttribute("type") || undefined,
+          placeholder: el.getAttribute("placeholder") || undefined,
+        };
+      });
 
-    // perceive() above only ever looks at interactive tags — a price,
-    // rating, or any other plain readable fact almost always lives in a
-    // <span>/<div>/<p>, which never enters that list. Without this, the
-    // agent can click into the exact right page and still have no way to
-    // select or read the text it was asked to find. Surface any leaf
-    // element (no element children — avoids matching giant container divs)
-    // whose text looks like a price, so the answer can come straight from
-    // this same perceive() call instead of needing a separate extract step.
-    const priceRegex = /[₹$€£]\s?[\d,]+(\.\d+)?/;
+    // perceive() above only ever looks at interactive tags — any plain
+    // readable fact (price, quota, rating, date, count) almost always lives
+    // in a <span>/<div>/<p>, which never enters that list. Originally this
+    // only matched currency-formatted text ("find the price of X" tasks) —
+    // too narrow: a task asking for e.g. "0 / 500 calls per day" trial
+    // usage has no currency symbol, so it never surfaced here, and the
+    // model had no legitimate way to read it at all. It resorted to
+    // guessing extract(selector="body") to read the whole page instead —
+    // which "succeeds" every time (body always exists) and loops forever
+    // rather than failing fast. Broadened to any short leaf text
+    // containing a digit — covers prices, quotas, percentages, counts,
+    // dates — so the answer can come from this same perceive() call
+    // instead of the model needing to invent a selector to find it.
+    const factRegex = /\d/;
     const textMatches = Array.from(document.querySelectorAll("body *"))
       .filter((el) => el.children.length === 0)
-      .filter((el) => priceRegex.test(el.innerText || ""))
+      .filter((el) => {
+        const t = (el.innerText || "").trim();
+        return t.length > 0 && t.length <= 100 && factRegex.test(t);
+      })
       .filter(isVisible)
-      .slice(0, 30)
+      .slice(0, 40)
       .map((el) => ({
         selector: selectorFor(el),
         text: (el.innerText || "").trim().slice(0, 80),
@@ -69,5 +87,6 @@ export async function perceive(page) {
     return { elements, textMatches };
   });
 
-  return { url, title, elements, textMatches };
+  const knownSelectors = new Set([...elements.map((e) => e.selector), ...textMatches.map((t) => t.selector)]);
+  return { url, title, elements, textMatches, knownSelectors };
 }

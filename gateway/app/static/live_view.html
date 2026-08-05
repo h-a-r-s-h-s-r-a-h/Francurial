@@ -120,11 +120,19 @@
 
         function connect() {
           ws = new WebSocket(wsUrl);
+          let sessionConfirmed = false; // set true only once we get real app data, not just a handshake
 
           ws.onopen = () => {
             statusEl.textContent = "connected";
             statusEl.classList.remove("disconnected");
-            retries = 0;
+            // Do NOT reset `retries` here. Per the WebSocket spec, onopen
+            // fires as soon as the handshake completes — even when the
+            // worker immediately closes right after (e.g. "no session yet",
+            // code 4001). Resetting the counter here meant every doomed
+            // attempt reset it right before onclose incremented it back to
+            // 1, so it could never reach MAX_RETRIES: an unbounded
+            // reconnect loop disguised as a bounded one. Only a message
+            // that proves a real session exists should reset it.
           };
 
           ws.onclose = (evt) => {
@@ -133,10 +141,16 @@
               statusEl.textContent = `unavailable: ${evt.reason || "link invalid or expired"}`;
               return;
             }
+            if (evt.code === 1000 && evt.reason === "task finished") {
+              // Legitimate, expected end of task — the session is never
+              // coming back, so retrying here would just loop forever.
+              statusEl.textContent = "task finished";
+              return;
+            }
             // code 4001 ("session not ready yet") or a generic/abnormal close —
             // the browser session may still be launching (Chromium can take a
-            // couple seconds), or the task already finished. Retry with backoff
-            // rather than leaving the viewer stuck on the first blip.
+            // couple seconds). Retry with backoff rather than leaving the
+            // viewer stuck on the first blip.
             if (retries >= MAX_RETRIES) {
               statusEl.textContent =
                 "gave up reconnecting — refresh to try again";
@@ -151,6 +165,10 @@
 
           ws.onmessage = (evt) => {
             const msg = JSON.parse(evt.data);
+            if (!sessionConfirmed && (msg.type === "control_state" || msg.type === "frame")) {
+              sessionConfirmed = true;
+              retries = 0; // a real, live session exists — safe to reset the counter now
+            }
             switch (msg.type) {
               case "frame":
                 frame.src = "data:image/jpeg;base64," + msg.data;
