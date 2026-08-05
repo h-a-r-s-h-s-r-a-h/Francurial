@@ -42,8 +42,8 @@ and polling `GET /v1/tasks/{task_id}` once it's done gets you the real, extracte
   "result": {
     "data": {
       "personal_info": {
-        "first_name": "Harsh", "last_name": ".", "phone": "6203104630",
-        "email": "harshvirat894@gmail.com", "joined_on": "Aug 01, 2026",
+        "first_name": "Harsh", "last_name": ".", "phone": "1234567879",
+        "email": "harsh#gmail.com", "joined_on": "Aug 01, 2026",
         "address": "", "city": "", "state": "", "country": "-- Select Country --", "postal_code": ""
       }
     },
