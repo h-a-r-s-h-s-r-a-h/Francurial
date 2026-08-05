@@ -26,8 +26,11 @@ export function createLiveServer(httpServer) {
 function handleConnection(taskId, ws) {
   const session = sessions.get(taskId);
   if (!session) {
-    ws.send(JSON.stringify({ type: "error", message: "no active session for this task" }));
-    ws.close();
+    // Registered with the gateway (so it's routable) but Chromium/CDP hasn't
+    // finished attaching yet — transient, not a permanent failure. Distinct
+    // close code so the viewer page knows to retry rather than give up.
+    ws.send(JSON.stringify({ type: "error", message: "session not ready yet" }));
+    ws.close(4001, "session not ready yet");
     return;
   }
 
@@ -178,7 +181,14 @@ export async function attachLiveSession(taskId, context, page) {
     } catch {
       // ignore — page/context likely already closing
     }
+    const session = sessions.get(taskId);
     broadcast(taskId, { type: "session_ended" });
+    // Close each viewer explicitly — otherwise these sockets sit open
+    // indefinitely with no more frames ever coming, leaking connections
+    // over the life of a long-running worker process handling many tasks.
+    for (const viewer of session?.viewers ?? []) {
+      if (viewer.readyState === viewer.OPEN) viewer.close(1000, "task finished");
+    }
     sessions.delete(taskId);
   };
 }

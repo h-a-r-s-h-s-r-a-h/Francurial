@@ -3,7 +3,7 @@ import { perceive } from "./perceive.js";
 import { reason } from "./reason.js";
 import { act } from "./act.js";
 import { detectCaptcha, attemptAutoSolve } from "../services/captchaService.js";
-import { getControlState, waitForAgentControl, publishControlSignal } from "../services/controlLockService.js";
+import { getControlState, waitForAgentControl, requestHumanControl } from "../services/controlLockService.js";
 import { appendAudit, updateStatus } from "../services/gatewayClient.js";
 import { logger } from "../utils/logger.js";
 
@@ -49,7 +49,7 @@ export async function runAgentLoop({ taskId, page, context, goal, model, credent
       } else {
         await appendAudit(taskId, step, "captcha_handoff", {});
         await updateStatus(taskId, { status: "waiting_input", wait_reason: "captcha", control_state: "human" });
-        await publishControlSignal(taskId, "take_control"); // reflect it in shared state even though no human clicked yet
+        await requestHumanControl(taskId); // sets local state before waiting — see controlLockService for why
         await waitForAgentControl(taskId);
         await appendAudit(taskId, step, "captcha_solved", { by: "human" });
         await updateStatus(taskId, { status: "running", wait_reason: null, control_state: "agent" });

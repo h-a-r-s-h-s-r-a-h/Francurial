@@ -36,6 +36,23 @@ export async function publishControlSignal(taskId, signal) {
   await redis.publish(`control:${taskId}`, JSON.stringify({ signal }));
 }
 
+/**
+ * For control changes triggered by code in THIS SAME process (e.g. the
+ * agent loop handing off on an unsolved captcha) that are about to
+ * immediately wait on the result: set state synchronously first, then
+ * publish for any other observers. Using publishControlSignal + an
+ * immediate waitForAgentControl here would race — publish() acks on one
+ * Redis connection, but the local state only updates when the pmessage
+ * arrives back on the separate subscriber connection, with no ordering
+ * guarantee between the two. That race let waitForAgentControl resolve
+ * before "human" had even been locally applied, causing the wait to be
+ * skipped entirely on the very captcha handoff it exists to gate.
+ */
+export async function requestHumanControl(taskId) {
+  state.set(taskId, "human");
+  await publishControlSignal(taskId, "take_control");
+}
+
 /** Resolves once the task's control state flips (back) to 'agent'. */
 export function waitForAgentControl(taskId) {
   if (getControlState(taskId) === "agent") return Promise.resolve();

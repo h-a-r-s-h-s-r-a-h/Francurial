@@ -1,0 +1,263 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Francurial — Live Session</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #111;
+        color: #eee;
+      }
+      #bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        background: #1a1a1a;
+        border-bottom: 1px solid #333;
+      }
+      #bar button {
+        padding: 6px 14px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      #takeBtn {
+        background: #2563eb;
+        color: white;
+      }
+      #releaseBtn {
+        background: #6b7280;
+        color: white;
+      }
+      #continueBtn {
+        background: #16a34a;
+        color: white;
+      }
+      #status {
+        margin-left: auto;
+        font-size: 13px;
+        color: #aaa;
+      }
+      #stage {
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+      }
+      #frame {
+        max-width: 100%;
+        border: 1px solid #333;
+        cursor: default;
+      }
+      #frame.controlling {
+        cursor: crosshair;
+      }
+      #log {
+        max-width: 1366px;
+        margin: 0 auto;
+        padding: 8px 14px;
+        font-family: monospace;
+        font-size: 12px;
+        color: #8f8;
+        max-height: 140px;
+        overflow-y: auto;
+        background: #0a0a0a;
+        border-top: 1px solid #333;
+      }
+      .disconnected {
+        color: #f87171;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <button id="takeBtn">Take control</button>
+      <button id="releaseBtn" disabled>Release control</button>
+      <button id="continueBtn">Continue (resume agent)</button>
+      <span id="status">connecting…</span>
+    </div>
+    <div id="stage"><img id="frame" alt="live session frame" /></div>
+    <div id="log"></div>
+
+    <script>
+      (function () {
+        const parts = location.pathname.split("/"); // /v1/live/{task_id}/view
+        const taskId = parts[3];
+        const token = new URLSearchParams(location.search).get("token");
+        const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+        const wsUrl = `${wsScheme}://${location.host}/v1/live/${taskId}?token=${encodeURIComponent(token)}`;
+
+        const frame = document.getElementById("frame");
+        const statusEl = document.getElementById("status");
+        const logEl = document.getElementById("log");
+        const takeBtn = document.getElementById("takeBtn");
+        const releaseBtn = document.getElementById("releaseBtn");
+        const continueBtn = document.getElementById("continueBtn");
+
+        let inControl = false;
+        let ws;
+
+        function log(line) {
+          const div = document.createElement("div");
+          div.textContent = `[${new Date().toLocaleTimeString()}] ${line}`;
+          logEl.appendChild(div);
+          logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function setControlling(on) {
+          inControl = on;
+          frame.classList.toggle("controlling", on);
+          takeBtn.disabled = on;
+          releaseBtn.disabled = !on;
+        }
+
+        const PERMANENT_CLOSE_CODES = new Set([4401, 4404, 4502]); // invalid/expired token, no such task, worker unreachable
+        const MAX_RETRIES = 8;
+        let retries = 0;
+
+        function connect() {
+          ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            statusEl.textContent = "connected";
+            statusEl.classList.remove("disconnected");
+            retries = 0;
+          };
+
+          ws.onclose = (evt) => {
+            statusEl.classList.add("disconnected");
+            if (PERMANENT_CLOSE_CODES.has(evt.code)) {
+              statusEl.textContent = `unavailable: ${evt.reason || "link invalid or expired"}`;
+              return;
+            }
+            // code 4001 ("session not ready yet") or a generic/abnormal close —
+            // the browser session may still be launching (Chromium can take a
+            // couple seconds), or the task already finished. Retry with backoff
+            // rather than leaving the viewer stuck on the first blip.
+            if (retries >= MAX_RETRIES) {
+              statusEl.textContent =
+                "gave up reconnecting — refresh to try again";
+              return;
+            }
+            retries += 1;
+            statusEl.textContent = `waiting for session to start… (retry ${retries}/${MAX_RETRIES})`;
+            setTimeout(connect, Math.min(1000 * retries, 5000));
+          };
+
+          ws.onerror = () => log("connection error");
+
+          ws.onmessage = (evt) => {
+            const msg = JSON.parse(evt.data);
+            switch (msg.type) {
+              case "frame":
+                frame.src = "data:image/jpeg;base64," + msg.data;
+                break;
+              case "control_state":
+                statusEl.textContent = msg.hasController
+                  ? inControl
+                    ? "you have control"
+                    : "another viewer has control"
+                  : `agent driving (${msg.viewers} viewer${msg.viewers === 1 ? "" : "s"})`;
+                if (!msg.hasController) setControlling(false);
+                break;
+              case "console":
+                log(`console.${msg.level}: ${msg.text}`);
+                break;
+              case "network":
+                log(`${msg.status} ${msg.url}`);
+                break;
+              case "session_ended":
+                log("session ended — task finished");
+                break;
+              case "error":
+                log("error: " + msg.message);
+                break;
+            }
+          };
+        }
+
+        takeBtn.onclick = () => {
+          ws.send(JSON.stringify({ type: "take_control" }));
+          setControlling(true);
+        };
+        releaseBtn.onclick = () => {
+          ws.send(JSON.stringify({ type: "release_control" }));
+          setControlling(false);
+        };
+        continueBtn.onclick = () => {
+          ws.send(JSON.stringify({ type: "continue" }));
+          setControlling(false);
+        };
+
+        function relativeCoords(evt) {
+          const rect = frame.getBoundingClientRect();
+          const scaleX = frame.naturalWidth / rect.width || 1;
+          const scaleY = frame.naturalHeight / rect.height || 1;
+          return {
+            x: (evt.clientX - rect.left) * scaleX,
+            y: (evt.clientY - rect.top) * scaleY,
+          };
+        }
+
+        frame.addEventListener("mousedown", (evt) => {
+          if (!inControl) return;
+          const { x, y } = relativeCoords(evt);
+          ws.send(
+            JSON.stringify({
+              type: "input",
+              input: { kind: "mouse", type: "mousePressed", x, y },
+            }),
+          );
+        });
+        frame.addEventListener("mouseup", (evt) => {
+          if (!inControl) return;
+          const { x, y } = relativeCoords(evt);
+          ws.send(
+            JSON.stringify({
+              type: "input",
+              input: { kind: "mouse", type: "mouseReleased", x, y },
+            }),
+          );
+        });
+        frame.addEventListener("mousemove", (evt) => {
+          if (!inControl) return;
+          const { x, y } = relativeCoords(evt);
+          ws.send(
+            JSON.stringify({
+              type: "input",
+              input: { kind: "mouse", type: "mouseMoved", x, y },
+            }),
+          );
+        });
+        window.addEventListener("keydown", (evt) => {
+          if (!inControl) return;
+          ws.send(
+            JSON.stringify({
+              type: "input",
+              input: {
+                kind: "key",
+                type: "keyDown",
+                key: evt.key,
+                text: evt.key.length === 1 ? evt.key : undefined,
+              },
+            }),
+          );
+        });
+        window.addEventListener("keyup", (evt) => {
+          if (!inControl) return;
+          ws.send(
+            JSON.stringify({
+              type: "input",
+              input: { kind: "key", type: "keyUp", key: evt.key },
+            }),
+          );
+        });
+
+        connect();
+      })();
+    </script>
+  </body>
+</html>

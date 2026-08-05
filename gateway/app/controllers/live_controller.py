@@ -47,6 +47,15 @@ async def proxy_live_session(ws: WebSocket, task_id: str, token: str) -> None:
             )
             for task in pending:
                 task.cancel()
+
+            # Forward whatever code/reason the worker closed with (e.g. 4001
+            # "session not ready yet") to the browser — without this, the
+            # client only ever sees a generic close and can't tell a
+            # transient "retry me" state apart from a permanent failure.
+            try:
+                await ws.close(code=upstream.close_code or 1000, reason=upstream.close_reason or "")
+            except RuntimeError:
+                pass  # browser side already disconnected first
     except OSError as exc:
         logger.warning("could not reach worker %s for task %s: %s", worker_addr, task_id, exc)
         await ws.close(code=4502, reason="worker session unreachable")

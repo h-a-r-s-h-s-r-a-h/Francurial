@@ -16,8 +16,10 @@ from app.services.webhook_service import dispatch_webhook
 
 
 def _live_url(task_id: uuid.UUID) -> str:
+    """Points at the HTML viewer page (routes/live.py: live_view_page), not
+    the raw WebSocket endpoint — a browser can't "open" a bare WS URL."""
     token = sign_live_token(str(task_id))
-    return f"{get_settings().public_base_url}/v1/live/{task_id}?token={token}"
+    return f"{get_settings().public_base_url}/v1/live/{task_id}/view?token={token}"
 
 
 def _get_task_or_404(db: Session, task_id: uuid.UUID) -> Task:
