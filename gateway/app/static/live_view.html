@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>Francurial — Live Session</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
     <style>
       body {
         margin: 0;
@@ -17,6 +18,10 @@
         padding: 10px 14px;
         background: #1a1a1a;
         border-bottom: 1px solid #333;
+      }
+      #logo {
+        height: 28px;
+        width: 28px;
       }
       #bar button {
         padding: 6px 14px;
@@ -74,9 +79,10 @@
   </head>
   <body>
     <div id="bar">
-      <button id="takeBtn">Take control</button>
-      <button id="releaseBtn" disabled>Release control</button>
-      <button id="continueBtn">Continue (resume agent)</button>
+      <img id="logo" src="/static/logo.png" alt="Francurial" />
+      <button id="takeBtn" type="button">Take control</button>
+      <button id="releaseBtn" type="button" disabled>Release control</button>
+      <button id="continueBtn" type="button">Continue (resume agent)</button>
       <span id="status">connecting…</span>
     </div>
     <div id="stage"><img id="frame" alt="live session frame" /></div>
@@ -112,6 +118,14 @@
           frame.classList.toggle("controlling", on);
           takeBtn.disabled = on;
           releaseBtn.disabled = !on;
+        }
+
+        function controlStatusText(msg, currentlyInControl) {
+          if (!msg.hasController) {
+            const viewerWord = msg.viewers === 1 ? "viewer" : "viewers";
+            return `agent driving (${msg.viewers} ${viewerWord})`;
+          }
+          return currentlyInControl ? "you have control" : "another viewer has control";
         }
 
         const PERMANENT_CLOSE_CODES = new Set([4401, 4404, 4502]); // invalid/expired token, no such task, worker unreachable
@@ -174,11 +188,7 @@
                 frame.src = "data:image/jpeg;base64," + msg.data;
                 break;
               case "control_state":
-                statusEl.textContent = msg.hasController
-                  ? inControl
-                    ? "you have control"
-                    : "another viewer has control"
-                  : `agent driving (${msg.viewers} viewer${msg.viewers === 1 ? "" : "s"})`;
+                statusEl.textContent = controlStatusText(msg, inControl);
                 if (!msg.hasController) setControlling(false);
                 break;
               case "console":

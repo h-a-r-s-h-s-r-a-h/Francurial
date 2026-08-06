@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/francurial_logo.png" alt="Francurial" width="220" />
+</p>
+
 # Francurial
 
 **Browser-automation-as-a-service.** Submit one task over HTTP — a target URL, an
@@ -34,7 +38,12 @@ returns immediately with a task ID and a live link:
 }
 ```
 
-and polling `GET /v1/tasks/{task_id}` once it's done gets you the real, extracted answer:
+and polling that task ID gets you the real, extracted answer once it's done:
+
+```bash
+curl -X GET http://localhost:8000/v1/tasks/task_id \
+  -H "Content-Type: application/json" -H "X-API-Key: dev-local-key-change-me"
+```
 
 ```json
 {
@@ -43,11 +52,11 @@ and polling `GET /v1/tasks/{task_id}` once it's done gets you the real, extracte
     "data": {
       "personal_info": {
         "first_name": "Harsh", "last_name": ".", "phone": "1234567879",
-        "email": "harsh#gmail.com", "joined_on": "Aug 01, 2026",
-        "address": "", "city": "", "state": "", "country": "-- Select Country --", "postal_code": ""
+        "email": "harsh@gmail.com", "joined_on": "Aug 01, 2026",
+        "address": "", "city": "", "state": "", "postal_code": ""
       }
     },
-    "summary": "Login is already complete and the profile details page is open. Personal info found: ..."
+    "summary": "Fetched profile details. Personal info visible on the profile page: First Name: Harsh; Last Name: .; Phone: 1234567879; Email: harsh@gmail.com; Address: blank; City: blank; State: blank; Postal Code: blank; Joined on Aug 01, 2026."
   }
 }
 ```
@@ -55,6 +64,13 @@ and polling `GET /v1/tasks/{task_id}` once it's done gets you the real, extracte
 No polling loop of your own required for the human side of it, either — open the
 `live_url` in a browser and you'll see the actual session streaming live, with buttons
 to take control, release it back, or continue past a CAPTCHA the agent got stuck on.
+
+Real anti-bot challenges are handled the same way: point a task at a Cloudflare- or
+reCAPTCHA-protected site and the agent tries to solve it itself first, then pauses in
+`waiting_input`/`wait_reason: "captcha"` the moment it can't — a human opens the
+`live_url`, solves the challenge, hits **Continue**, and the agent resumes exactly
+where it left off (fresh `perceive()`, not a cached plan) rather than losing progress
+or timing out silently.
 
 ## Feature list
 
