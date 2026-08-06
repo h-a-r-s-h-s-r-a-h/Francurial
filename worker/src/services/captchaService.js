@@ -6,7 +6,21 @@ const CAPTCHA_MARKERS = [
   ".h-captcha",
   ".cf-turnstile",
   '[class*="captcha" i]',
+  // Cloudflare's own auto-generated challenge page (not a site owner's manual
+  // Turnstile embed) doesn't carry the ".cf-turnstile"/"#challenge-stage"
+  // markers at all — confirmed by direct inspection against a real Cloudflare
+  // challenge page. It uses container IDs prefixed "cf-chl-", and the actual
+  // widget lives inside a shadow root these selectors can't see into anyway
+  // (this is deliberate anti-automation on Cloudflare's part) — the ID prefix
+  // is the reliable, verified signal that one is present at all.
+  '[id^="cf-chl"]',
 ];
+
+// Cloudflare's interstitial title flips to one of these well before its
+// container ID becomes queryable (measured: title at +1s, [id^="cf-chl"] not
+// until +2s) — checking title text first catches it faster than waiting on
+// the DOM marker below.
+const TITLE_MARKERS = /captcha|just a moment|checking your browser|attention required/i;
 
 /**
  * page.locator(...).isVisible() does NOT auto-wait — it checks the DOM at
@@ -22,7 +36,7 @@ const CAPTCHA_MARKERS = [
  */
 export async function detectCaptcha(page) {
   const title = await page.title().catch(() => "");
-  if (/captcha/i.test(title)) {
+  if (TITLE_MARKERS.test(title)) {
     return { detected: true, selector: null, via: "title" };
   }
 
