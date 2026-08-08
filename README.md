@@ -12,14 +12,13 @@ a live link so a human can watch it happen in real time, take the keyboard/mouse
 from the agent at any moment, and hand it back — including automatic pausing when the
 agent hits a CAPTCHA it can't solve itself.
 
-Repo: [github.com/h-a-r-s-h-s-r-a-h/Francurial](https://github.com/h-a-r-s-h-s-r-a-h/Francurial)
-License: [MIT](./LICENSE)
-
 ## Demo
 
 <p align="center">
-  <video src="public/francurial.mp4" autoplay muted loop playsinline controls width="720">
-    Your viewer doesn't support inline video — <a href="public/francurial.mp4">download/open francurial.mp4</a> directly.
+  <video autoplay muted loop playsinline controls width="720">
+    <source src="public/francurial.webm" type="video/webm" />
+    <source src="public/francurial.mp4" type="video/mp4" />
+    Your viewer doesn't support inline video — <a href="public/francurial.mp4">download/open the demo</a> directly.
   </video>
 </p>
 
