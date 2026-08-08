@@ -15,6 +15,20 @@ agent hits a CAPTCHA it can't solve itself.
 Repo: [github.com/h-a-r-s-h-s-r-a-h/Francurial](https://github.com/h-a-r-s-h-s-r-a-h/Francurial)
 License: [MIT](./LICENSE)
 
+## Demo
+
+<p align="center">
+  <video src="public/francurial.mp4" autoplay muted loop playsinline controls width="720">
+    Your viewer doesn't support inline video — <a href="public/francurial.mp4">download/open francurial.mp4</a> directly.
+  </video>
+</p>
+
+> **Note:** GitHub's own README renderer strips the `autoplay` attribute from embedded
+> videos (a deliberate platform restriction, not a bug here) — on github.com this plays
+> on click instead of automatically. It autoplays as intended everywhere that respects
+> the tag: cloned locally and opened in a browser, most IDE Markdown previews, and any
+> static-site generator that renders raw HTML.
+
 ## What it actually does
 
 ```bash

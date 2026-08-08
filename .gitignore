@@ -1,5 +1,4 @@
 __pycache__/
-.env
 *.pyc
 node_modules/
 cred.txt
