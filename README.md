@@ -218,9 +218,12 @@ francurial/
 ```bash
 git clone https://github.com/h-a-r-s-h-s-r-a-h/Francurial.git
 cd Francurial
+cp .env.example .env
 ```
 
-Edit `.env` and fill in at minimum:
+`.env` is gitignored on purpose — it's where your real secrets live, and `.env.example`
+is the template that's actually tracked in the repo. Edit your new `.env` and fill in
+at minimum:
 
 ```bash
 OPENROUTER_KEY="sk-or-v1-..."      # your OpenRouter API key
@@ -280,13 +283,58 @@ set `base_url`/`api_key` in the collection variables, and "Create Task" auto-sav
   "model": "openai/gpt-5.4",                                // optional — else MODEL from .env
   "webhook_url": "https://your-server/webhook",             // optional — HMAC-signed POST on completion
   "max_steps": 40,
-  "timeout_seconds": 600
+  "timeout_seconds": 600                                    // accepted and stored, not yet enforced by the agent loop — see Known limits
 }
 ```
 
 Internal worker↔gateway endpoints (`/internal/tasks/...`) are authenticated with
 `INTERNAL_SHARED_SECRET`, not the public API key — they're for the worker to claim
 tasks, report status, and append audit entries, and shouldn't be exposed publicly.
+
+### Webhook payloads
+
+If `webhook_url` was set, the gateway `POST`s this to it on `completed`/`failed`:
+
+```json
+{ "task_id": "...", "status": "completed", "result": { "summary": "...", "data": {} }, "error": null }
+```
+
+signed with an `X-Signature` header — HMAC-SHA256 of the raw JSON body, hex-encoded,
+using `WEBHOOK_HMAC_SECRET`. Verify it before trusting the payload:
+
+```python
+import hashlib, hmac
+
+def verify(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header)
+```
+
+Delivery retries with backoff on failure (see `app/services/webhook_service.py`);
+each attempt is logged in the `webhook_deliveries` table.
+
+### Live WebSocket protocol
+
+For building a custom viewer instead of using the provided `/view` page, connect to
+`WS /v1/live/{task_id}?token=...` directly. Server → client messages:
+
+| `type` | Meaning |
+|---|---|
+| `frame` | `{ data: "<base64 jpeg>" }` — one screencast frame |
+| `control_state` | `{ hasController: bool, viewers: number }` |
+| `console` | `{ level, text, timestamp }` — forwarded browser console entry |
+| `network` | `{ url, status }` — forwarded network response |
+| `session_ended` | task finished; no more frames coming |
+| `error` | `{ message }` — e.g. session not ready yet, retry |
+
+Client → server messages:
+
+| `type` | Meaning |
+|---|---|
+| `take_control` | Claim the input lock (no-op if someone else already holds it) |
+| `release_control` | Give the input lock back to the agent |
+| `continue` | Resume a paused agent (captcha solved / done looking around) — works even without holding the lock |
+| `input` | `{ input: { kind: "mouse"\|"key"\|"wheel", ... } }` — only honored from the current controller |
 
 ## Docker commands
 
@@ -350,6 +398,36 @@ kubectl apply -f k8s/postgres.yaml -f k8s/redis.yaml -f k8s/gateway-deployment.y
   form flows (login, multi-field forms) — the platform's loop-breakers and retries
   keep failures fast and clean, but a stronger model materially improves success rate
   on anything beyond a single-page read.
+- `timeout_seconds` is accepted in the request, stored, and passed through to the
+  worker — but nothing currently reads it there. Only `max_steps` actually bounds how
+  long a task can run; a slow-but-still-stepping task can exceed its stated
+  `timeout_seconds` today.
+
+## Troubleshooting
+
+- **Task fails immediately with "no visible elements or readable text"**: the page was
+  likely still rendering (SPA transition) when `perceive()` ran, or it's genuinely
+  blocked (CAPTCHA/interstitial) — check the `live_url` to see what was actually on
+  screen at that step.
+- **A CAPTCHA appears but the task just fails instead of pausing for a human**: the
+  detector in `worker/src/services/captchaService.js` only recognizes patterns it's
+  been taught (Google reCAPTCHA, hCaptcha, Cloudflare Turnstile). A provider it's never
+  seen will slip through — add its title text / DOM marker to `CAPTCHA_MARKERS` or
+  `TITLE_MARKERS` in that file once you know what the block page looks like.
+- **Task sits in `waiting_input` forever**: that's expected — it's parked waiting for
+  `POST /v1/tasks/{id}/continue` (or the Continue button in the live view). It won't
+  resume on its own.
+- **Task fails fast with "repeated the exact same action N times in a row"**: the
+  loop-breaker caught a stuck pattern (same click/type/navigate producing no progress)
+  and gave up deliberately rather than burning through `max_steps` silently. Check the
+  audit trail for what it kept repeating — often means the goal needs a stronger model,
+  or the selector it's using isn't what you'd expect.
+- **Demo video won't play**: if you re-record `public/francurial.*`, keep a WebM/VP9
+  copy alongside any MP4 — open-source Chromium builds (many Linux browsers, VS Code's
+  bundled Electron, Playwright itself) commonly lack the licensed H.264 decoder that
+  proprietary Chrome ships with, so an MP4-only H.264 file can fail with
+  `MEDIA_ERR_SRC_NOT_SUPPORTED` in exactly those environments even though the file
+  itself is fine.
 
 ## License
 

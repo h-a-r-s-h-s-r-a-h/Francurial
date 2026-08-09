@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Francurial",
-    "description": "Browser-automation task API: submit a task, check status, take/release control, and (internal) worker callbacks.",
+    "description": "Browser-automation task API: submit a task, check status, watch/control it live, resume past a CAPTCHA, and (internal) worker callbacks. See the repo README for full documentation, including the live WebSocket message protocol (not directly testable from this v2.1 Postman collection — see the note in the 'Live View' folder) and webhook signature verification.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -15,7 +15,9 @@
       "name": "Health",
       "request": {
         "method": "GET",
-        "url": { "raw": "{{base_url}}/healthz", "host": ["{{base_url}}"], "path": ["healthz"] }
+        "header": [],
+        "url": { "raw": "{{base_url}}/healthz", "host": ["{{base_url}}"], "path": ["healthz"] },
+        "description": "Liveness check. Returns {\"status\": \"ok\"} with no auth required. Use this first to confirm the gateway is up before anything else."
       }
     },
     {
@@ -44,7 +46,8 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"url\": \"https://www.amazon.com\",\n  \"instruction\": \"Login, search for Samsung 990 Pro 2TB SSD, add it to cart, and proceed to checkout without confirming the final purchase.\",\n  \"credentials\": {\n    \"email\": \"user@example.com\",\n    \"password\": \"mypassword\"\n  },\n  \"model\": \"openai/gpt-4o-mini\",\n  \"proxy\": {\n    \"host\": \"31.59.20.176\",\n    \"port\": 6754,\n    \"username\": \"klrxjayu\",\n    \"password\": \"2tmm11kat7hg\"\n  },\n  \"webhook_url\": null,\n  \"max_steps\": 40,\n  \"timeout_seconds\": 600\n}"
-        }
+        },
+        "description": "Submits a task and returns 202 immediately with a task_id and a signed live_url — it does not wait for the browser work to finish. The test script below auto-saves task_id into the collection variable so the other requests just work.\n\ncredentials are kept out of the model's context entirely (substituted server-side); proxy and model are optional per-request overrides — omit either to fall back to round-robin PROXY / MODEL from .env."
       },
       "response": []
     },
@@ -60,7 +63,42 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"url\": \"https://example.com\",\n  \"instruction\": \"Describe what you see, then finish.\",\n  \"proxy\": {\n    \"host\": \"proxy.example.com\",\n    \"port\": 6000,\n    \"username\": \"user\",\n    \"password\": \"pass\"\n  },\n  \"model\": \"openai/gpt-4o-mini\",\n  \"max_steps\": 10\n}"
-        }
+        },
+        "description": "Same endpoint, minimal task — useful as a fast smoke test that a proxy/model combination actually works before pointing a real task at it."
+      },
+      "response": []
+    },
+    {
+      "name": "Create Task (credentials only in instruction text)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/v1/tasks", "host": ["{{base_url}}"], "path": ["v1", "tasks"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://example.com\",\n  \"instruction\": \"go to login page, this is my email harsh@example.com and password is Correct-Horse-1, when login finished then read the account page\",\n  \"max_steps\": 40\n}"
+        },
+        "description": "Shows the fallback path: no structured \"credentials\" field this time — the email/password are only inside the free-text instruction. The model can't use type_credential() here (nothing was stored server-side for it to reference), so it falls back to typing the literal value it can already see in the goal text. This is safe (no new exposure — that value was already going to the LLM either way) but it is NOT encrypted at rest the way a real \"credentials\" field is, and it does appear in the task's audit trail as plain instruction text. Prefer the structured \"credentials\" field (see \"Create Task\" above) whenever you can."
+      },
+      "response": []
+    },
+    {
+      "name": "Create Task (with webhook)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/v1/tasks", "host": ["{{base_url}}"], "path": ["v1", "tasks"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://example.com\",\n  \"instruction\": \"Describe what you see, then finish.\",\n  \"webhook_url\": \"https://webhook.site/YOUR-UNIQUE-ID\",\n  \"max_steps\": 5\n}"
+        },
+        "description": "Swap in a real endpoint of your own, or a scratch one from https://webhook.site to inspect what arrives. On completed/failed, the gateway POSTs {task_id, status, result, error} to webhook_url with an X-Signature header — HMAC-SHA256 of the raw JSON body, hex-encoded, using WEBHOOK_HMAC_SECRET. See the README's \"Webhook payloads\" section for a verification code snippet. Delivery retries with backoff on failure; check the webhook_deliveries table if one goes missing."
       },
       "response": []
     },
@@ -73,7 +111,8 @@
           "raw": "{{base_url}}/v1/tasks/{{task_id}}",
           "host": ["{{base_url}}"],
           "path": ["v1", "tasks", "{{task_id}}"]
-        }
+        },
+        "description": "A plain Postgres row read — cheap to poll, never touches the live browser. Check status and wait_reason: status=\"waiting_input\" with wait_reason=\"captcha\" or \"human_takeover\" means it's parked waiting for you to open live_url and either solve something or click Continue (or call the Continue Task request below)."
       },
       "response": []
     },
@@ -90,12 +129,114 @@
           "host": ["{{base_url}}"],
           "path": ["v1", "tasks", "{{task_id}}", "continue"]
         },
-        "body": { "mode": "raw", "raw": "{\n  \"note\": \"captcha solved manually\"\n}" }
+        "body": { "mode": "raw", "raw": "{\n  \"note\": \"captcha solved manually\"\n}" },
+        "description": "Only valid while the task is in status=\"waiting_input\" — 409s otherwise. Resumes the agent loop, which re-perceives the current page fresh (not a cached plan) and keeps working toward the original goal. Equivalent to clicking Continue in the live view page."
       },
       "response": []
     },
     {
+      "name": "Live View",
+      "description": "The live view has two parts, and only one of them is a plain HTTP request Postman can issue.",
+      "item": [
+        {
+          "name": "Open Live View Page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/live/{{task_id}}/view?token=PASTE_TOKEN_FROM_live_url",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "live", "{{task_id}}", "view"],
+              "query": [{ "key": "token", "value": "PASTE_TOKEN_FROM_live_url" }]
+            },
+            "description": "Returns the actual browser-facing HTML page (take/release control, continue, live frame, console/network log). This is meant to be opened in an actual browser, not really \"used\" from Postman — but issuing the GET here confirms the route is up and the signed token you got back from Create Task is valid. Copy the full live_url from a Create Task response and paste it into a browser tab to actually watch/control the session; the ?token=... query param is a signed, expiring HMAC token generated per-task, not something you set yourself."
+          },
+          "response": []
+        },
+        {
+          "name": "(info) Live WebSocket protocol — not representable in this collection",
+          "description": "WS /v1/live/{task_id}?token=... is what the viewer page's own JS connects to for the actual video/control stream. Postman's v2.1 collection schema (what this file uses) is HTTP-request-only, so a native WebSocket request can't be exported into this JSON in a portable way — adding one risks shipping a collection that fails to import correctly elsewhere.\n\nTo test the WS endpoint directly: open a WebSocket connection (browser DevTools console, wscat, or Postman's own WebSocket Request feature added manually in the app) to the exact live_url's WS equivalent (same path, without /view). Server -> client messages: {type:\"frame\", data:\"<base64 jpeg>\"}, {type:\"control_state\", hasController, viewers}, {type:\"console\", level, text}, {type:\"network\", url, status}, {type:\"session_ended\"}, {type:\"error\", message}. Client -> server: {type:\"take_control\"}, {type:\"release_control\"}, {type:\"continue\"}, {type:\"input\", input:{kind:\"mouse\"|\"key\"|\"wheel\", ...}}. Full field-level detail is in the README's \"Live WebSocket protocol\" section.",
+          "item": []
+        }
+      ]
+    },
+    {
+      "name": "CAPTCHA / Human Handoff Walkthrough",
+      "description": "Reproduces the platform's most distinctive behavior end to end: the agent tries a CAPTCHA itself, hands off to a human when it can't solve it, and resumes exactly where it left off. Run these in order.",
+      "item": [
+        {
+          "name": "1. Create Task Against a Protected Site",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('task_id', body.task_id);",
+                  "    console.log('Saved task_id:', body.task_id, '| live_url:', body.live_url);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{api_key}}" }
+            ],
+            "url": { "raw": "{{base_url}}/v1/tasks", "host": ["{{base_url}}"], "path": ["v1", "tasks"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://chatgpt.com/\",\n  \"instruction\": \"search for best open source llm and when it answers, return the full answer\",\n  \"max_steps\": 40\n}"
+            },
+            "description": "chatgpt.com sits behind a Cloudflare Turnstile check for automated traffic, which reliably triggers the handoff path for this walkthrough. Any Cloudflare- or reCAPTCHA-protected URL works the same way."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Get Task Status (expect waiting_input)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/tasks/{{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "tasks", "{{task_id}}"]
+            },
+            "description": "Poll this a few seconds after step 1. Once the agent hits the challenge and can't solve it itself, status flips to \"waiting_input\" with wait_reason=\"captcha\" and control_state=\"human\" — that's your cue to open live_url."
+          },
+          "response": []
+        },
+        {
+          "name": "3. (manual) Open live_url, solve the challenge, click Continue",
+          "description": "Copy the live_url from step 1's response into a real browser tab. You'll see the actual live session — solve the CAPTCHA there, then click the Continue button in the page (or just run step 4 below, which does the same thing via the API).",
+          "item": []
+        },
+        {
+          "name": "4. Continue Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{api_key}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/tasks/{{task_id}}/continue",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "tasks", "{{task_id}}", "continue"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"note\": \"captcha solved manually\"\n}" },
+            "description": "Resumes the agent right where it left off — it re-perceives the now-cleared page fresh rather than replaying a cached plan. Poll Get Task Status again afterward to watch it keep going."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Internal (worker-only, for debugging)",
+      "description": "Authenticated with X-Internal-Secret (INTERNAL_SHARED_SECRET), not the public X-API-Key. These exist for the worker to claim tasks, report status, and append audit entries — keep them off any public ingress in a real deployment.",
       "item": [
         {
           "name": "Claim Task",
@@ -110,7 +251,8 @@
               "host": ["{{base_url}}"],
               "path": ["internal", "tasks", "{{task_id}}", "claim"]
             },
-            "body": { "mode": "raw", "raw": "{\n  \"worker_addr\": \"127.0.0.1:9000\"\n}" }
+            "body": { "mode": "raw", "raw": "{\n  \"worker_addr\": \"127.0.0.1:9000\"\n}" },
+            "description": "Called by the worker right after popping a task off the Redis stream. Records which worker/pod owns the task (for live-view WS routing) and returns the decrypted url/instruction/credentials/proxy/model needed to actually execute it."
           },
           "response": []
         },
@@ -130,7 +272,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"status\": \"running\",\n  \"wait_reason\": null,\n  \"control_state\": \"agent\"\n}"
-            }
+            },
+            "description": "Partial update — only fields present in the body are changed. wait_reason must be sent as an explicit null (not omitted) to clear it once a task resumes."
           },
           "response": []
         },
@@ -150,7 +293,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"step_index\": 1,\n  \"type\": \"reason\",\n  \"payload\": { \"action\": \"click\" }\n}"
-            }
+            },
+            "description": "Appends one row per agent-loop event (perceive/reason/act/captcha_*/human_*). Sensitive keys (password, email, credentials, proxy) are redacted server-side before storage regardless of what's sent here."
           },
           "response": []
         }
